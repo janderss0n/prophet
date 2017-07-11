@@ -1090,12 +1090,12 @@ class Prophet(object):
             fig = plt.figure(facecolor='w', figsize=(10, 6))
             ax = fig.add_subplot(111)
         # Compute monthly seasonality for a Sun-Sat sequence of dates.
-        days = (pd.date_range(start='2017-01-01', periods=7) +
+        days = (pd.date_range(start='2017-01-01', periods=30) +
                 pd.Timedelta(days=monthly_start))
         df_w = pd.DataFrame({'ds': days, 'cap': 1.})
         df_w = self.setup_dataframe(df_w)
         seas = self.predict_seasonal_components(df_w)
-        days = days.weekday_name
+        #days = days.weekday_name
         artists += ax.plot(range(len(days)), seas['monthly'], ls='-',
                            c='#0072B2')
         if uncertainty:
@@ -1105,6 +1105,6 @@ class Prophet(object):
         ax.grid(True, which='major', c='gray', ls='-', lw=1, alpha=0.2)
         ax.set_xticks(range(len(days)))
         ax.set_xticklabels(days)
-        ax.set_xlabel('Day of week')
+        ax.set_xlabel('Day of month')
         ax.set_ylabel('monthly')
         return artists
