@@ -39,7 +39,6 @@ except ImportError:
 
 class Prophet(object):
     """Prophet forecaster.
-
     Parameters
     ----------
     growth: String 'linear' or 'logistic' to specify a linear or logistic
@@ -83,6 +82,7 @@ class Prophet(object):
             n_changepoints=25,
             yearly_seasonality='auto',
             weekly_seasonality='auto',
+            monthly_seasonality='auto',
             holidays=None,
             seasonality_prior_scale=10.0,
             holidays_prior_scale=10.0,
@@ -101,6 +101,7 @@ class Prophet(object):
 
         self.yearly_seasonality = yearly_seasonality
         self.weekly_seasonality = weekly_seasonality
+        self.monthly_seasonality = monthly_seasonality
 
         if holidays is not None:
             if not (
@@ -151,22 +152,19 @@ class Prophet(object):
             for h in self.holidays['holiday'].unique():
                 if '_delim_' in h:
                     raise ValueError('Holiday name cannot contain "_delim_"')
-                if h in ['zeros', 'yearly', 'weekly', 'yhat', 'seasonal',
+                if h in ['zeros', 'yearly', 'weekly', 'monthly', 'yhat', 'seasonal',
                          'trend']:
                     raise ValueError('Holiday name {} reserved.'.format(h))
 
     def setup_dataframe(self, df, initialize_scales=False):
         """Prepare dataframe for fitting or predicting.
-
         Adds a time index and scales y. Creates auxiliary columns 't', 't_ix',
         'y_scaled', and 'cap_scaled'. These columns are used during both
         fitting and predicting.
-
         Parameters
         ----------
         df: pd.DataFrame with columns ds, y, and cap if logistic growth.
         initialize_scales: Boolean set scaling factors in self from df.
-
         Returns
         -------
         pd.DataFrame prepared for fitting or predicting.
@@ -197,7 +195,6 @@ class Prophet(object):
 
     def set_changepoints(self):
         """Set changepoints
-
         Sets m$changepoints to the dates of changepoints. Either:
         1) The changepoints were passed in explicitly.
             A) They are empty.
@@ -242,13 +239,11 @@ class Prophet(object):
     def fourier_series(dates, period, series_order):
         """Provides Fourier series components with the specified frequency
         and order.
-
         Parameters
         ----------
         dates: pd.Series containing timestamps.
         period: Number of days of the period.
         series_order: Number of components.
-
         Returns
         -------
         Matrix with seasonality features.
@@ -268,7 +263,6 @@ class Prophet(object):
     @classmethod
     def make_seasonality_features(cls, dates, period, series_order, prefix):
         """Data frame with seasonality features.
-
         Parameters
         ----------
         cls: Prophet class.
@@ -276,7 +270,6 @@ class Prophet(object):
         period: Number of days of the period.
         series_order: Number of components.
         prefix: Column name prefix.
-
         Returns
         -------
         pd.DataFrame with seasonality features.
@@ -290,11 +283,9 @@ class Prophet(object):
 
     def make_holiday_features(self, dates):
         """Construct a dataframe of holiday features.
-
         Parameters
         ----------
         dates: pd.Series containing timestamps used for computing seasonality.
-
         Returns
         -------
         pd.DataFrame with a column for each holiday.
@@ -337,11 +328,9 @@ class Prophet(object):
 
     def make_all_seasonality_features(self, df):
         """Dataframe with seasonality features.
-
         Parameters
         ----------
         df: pd.DataFrame with dates for computing seasonality features.
-
         Returns
         -------
         pd.DataFrame with seasonality.
@@ -367,6 +356,13 @@ class Prophet(object):
                 3,
                 'weekly',
             ))
+        if self.monthly_seasonality:
+            seasonal_features.append(self.make_seasonality_features(
+                df['ds'],
+                30.4375,
+                7,
+                'monthly',
+            ))
 
         if self.holidays is not None:
             seasonal_features.append(self.make_holiday_features(df['ds']))
@@ -374,7 +370,6 @@ class Prophet(object):
 
     def set_auto_seasonalities(self):
         """Set seasonalities that were left on auto.
-
         Turns on yearly seasonality if there is >=2 years of history.
         Turns on weekly seasonality if there is >=2 weeks of history, and the
         spacing between dates in the history is <7 days.
@@ -398,20 +393,26 @@ class Prophet(object):
                             'weekly_seasonality=True to override this.')
             else:
                 self.weekly_seasonality = True
+        if self.monthly_seasonality == 'auto':
+            dt = self.history['ds'].diff()
+            min_dt = dt.iloc[dt.nonzero()[0]].min()
+            if (last - first < pd.Timedelta(days=30)):
+                self.monthly_seasonality = False
+                logger.info('Disabling monthly seasonality. Run prophet with '
+                            'monthly_seasonality=True to override this.')
+            else:
+                self.monthly_seasonality = True
 
     @staticmethod
     def linear_growth_init(df):
         """Initialize linear growth.
-
         Provides a strong initialization for linear growth by calculating the
         growth and offset parameters that pass the function through the first
         and last points in the time series.
-
         Parameters
         ----------
         df: pd.DataFrame with columns ds (date), y_scaled (scaled time series),
             and t (scaled time).
-
         Returns
         -------
         A tuple (k, m) with the rate (k) and offset (m) of the linear growth
@@ -426,16 +427,13 @@ class Prophet(object):
     @staticmethod
     def logistic_growth_init(df):
         """Initialize logistic growth.
-
         Provides a strong initialization for logistic growth by calculating the
         growth and offset parameters that pass the function through the first
         and last points in the time series.
-
         Parameters
         ----------
         df: pd.DataFrame with columns ds (date), cap_scaled (scaled capacity),
             y_scaled (scaled time series), and t (scaled time).
-
         Returns
         -------
         A tuple (k, m) with the rate (k) and offset (m) of the logistic growth
@@ -463,7 +461,6 @@ class Prophet(object):
     # fb-block 7
     def fit(self, df, **kwargs):
         """Fit the Prophet model.
-
         This sets self.params to contain the fitted model parameters. It is a
         dictionary parameter names as keys and the following items:
             k (Mx1 array): M posterior samples of the initial slope.
@@ -472,7 +469,6 @@ class Prophet(object):
             beta (MxK matrix): Coefficients for K seasonality features.
             sigma_obs (Mx1 array): Noise level.
         Note that M=1 if MAP estimation.
-
         Parameters
         ----------
         df: pd.DataFrame containing the history. Must have columns ds (date
@@ -481,7 +477,6 @@ class Prophet(object):
             each ds.
         kwargs: Additional arguments passed to the optimizing or sampling
             functions in Stan.
-
         Returns
         -------
         The fitted Prophet object.
@@ -565,13 +560,11 @@ class Prophet(object):
     # fb-block 8
     def predict(self, df=None):
         """Predict using the prophet model.
-
         Parameters
         ----------
         df: pd.DataFrame with dates for predictions (column ds), and capacity
             (column cap) if logistic growth. If not provided, predictions are
             made on the history.
-
         Returns
         -------
         A pd.DataFrame with the forecast components.
@@ -592,7 +585,6 @@ class Prophet(object):
     @staticmethod
     def piecewise_linear(t, deltas, k, m, changepoint_ts):
         """Evaluate the piecewise linear function.
-
         Parameters
         ----------
         t: np.array of times on which the function is evaluated.
@@ -600,7 +592,6 @@ class Prophet(object):
         k: Float initial rate.
         m: Float initial offset.
         changepoint_ts: np.array of changepoint times.
-
         Returns
         -------
         Vector y(t).
@@ -619,7 +610,6 @@ class Prophet(object):
     @staticmethod
     def piecewise_logistic(t, cap, deltas, k, m, changepoint_ts):
         """Evaluate the piecewise logistic function.
-
         Parameters
         ----------
         t: np.array of times on which the function is evaluated.
@@ -628,7 +618,6 @@ class Prophet(object):
         k: Float initial rate.
         m: Float initial offset.
         changepoint_ts: np.array of changepoint times.
-
         Returns
         -------
         Vector y(t).
@@ -652,11 +641,9 @@ class Prophet(object):
 
     def predict_trend(self, df):
         """Predict trend using the prophet model.
-
         Parameters
         ----------
         df: Prediction dataframe.
-
         Returns
         -------
         Vector with trend on prediction dates.
@@ -677,11 +664,9 @@ class Prophet(object):
 
     def predict_seasonal_components(self, df):
         """Predict seasonality broken down into components.
-
         Parameters
         ----------
         df: Prediction dataframe.
-
         Returns
         -------
         Dataframe with seasonal components.
@@ -724,11 +709,9 @@ class Prophet(object):
 
     def predict_uncertainty(self, df):
         """Predict seasonality broken down into components.
-
         Parameters
         ----------
         df: Prediction dataframe.
-
         Returns
         -------
         Dataframe with uncertainty intervals.
@@ -763,13 +746,11 @@ class Prophet(object):
 
     def sample_model(self, df, seasonal_features, iteration):
         """Simulate observations from the extrapolated generative model.
-
         Parameters
         ----------
         df: Prediction dataframe.
         seasonal_features: pd.DataFrame of seasonal features.
         iteration: Int sampling iteration to use parameters from.
-
         Returns
         -------
         Dataframe with trend, seasonality, and yhat, each like df['t'].
@@ -790,13 +771,11 @@ class Prophet(object):
 
     def sample_predictive_trend(self, df, iteration):
         """Simulate the trend using the extrapolated generative model.
-
         Parameters
         ----------
         df: Prediction dataframe.
         seasonal_features: pd.DataFrame of seasonal features.
         iteration: Int sampling iteration to use parameters from.
-
         Returns
         -------
         np.array of simulated trend over df['t'].
@@ -848,14 +827,12 @@ class Prophet(object):
 
     def make_future_dataframe(self, periods, freq='D', include_history=True):
         """Simulate the trend using the extrapolated generative model.
-
         Parameters
         ----------
         periods: Int number of periods to forecast forward.
         freq: Any valid frequency for pd.date_range, such as 'D' or 'M'.
         include_history: Boolean to include the historical dates in the data
             frame for predictions.
-
         Returns
         -------
         pd.Dataframe that extends forward from the end of self.history for the
@@ -877,7 +854,6 @@ class Prophet(object):
     def plot(self, fcst, ax=None, uncertainty=True, plot_cap=True, xlabel='ds',
              ylabel='y'):
         """Plot the Prophet forecast.
-
         Parameters
         ----------
         fcst: pd.DataFrame output of self.predict.
@@ -887,7 +863,6 @@ class Prophet(object):
             in the figure, if available.
         xlabel: Optional label name on X-axis
         ylabel: Optional label name on Y-axis
-
         Returns
         -------
         A matplotlib figure.
@@ -912,12 +887,10 @@ class Prophet(object):
         return fig
 
     def plot_components(self, fcst, uncertainty=True, plot_cap=True,
-                        weekly_start=0, yearly_start=0):
+                        weekly_start=0, yearly_start=0, monthly_start=0):
         """Plot the Prophet forecast components.
-
         Will plot whichever are available of: trend, holidays, weekly
         seasonality, and yearly seasonality.
-
         Parameters
         ----------
         fcst: pd.DataFrame output of self.predict.
@@ -930,7 +903,6 @@ class Prophet(object):
         yearly_start: Optional int specifying the start day of the yearly
             seasonality plot. 0 (default) starts the year on Jan 1. 1 shifts
             by 1 day to Jan 2, and so on.
-
         Returns
         -------
         A matplotlib figure.
@@ -939,7 +911,8 @@ class Prophet(object):
         components = [('trend', True),
                       ('holidays', self.holidays is not None),
                       ('weekly', 'weekly' in fcst),
-                      ('yearly', 'yearly' in fcst)]
+                      ('yearly', 'yearly' in fcst),
+                      ('monthly', 'monthly' in fcst)]
         components = [plot for plot, cond in components if cond]
         npanel = len(components)
 
@@ -958,13 +931,15 @@ class Prophet(object):
             elif plot == 'yearly':
                 self.plot_yearly(
                     ax=ax, uncertainty=uncertainty, yearly_start=yearly_start)
+            elif plot == 'monthly':
+                self.plot_monthly(
+                    ax=ax, uncertainty=uncertainty, monthly_start=monthly_start)
 
         fig.tight_layout()
         return fig
 
     def plot_trend(self, fcst, ax=None, uncertainty=True, plot_cap=True):
         """Plot the trend component of the forecast.
-
         Parameters
         ----------
         fcst: pd.DataFrame output of self.predict.
@@ -972,7 +947,6 @@ class Prophet(object):
         uncertainty: Optional boolean to plot uncertainty intervals.
         plot_cap: Optional boolean indicating if the capacity should be shown
             in the figure, if available.
-
         Returns
         -------
         a list of matplotlib artists
@@ -997,14 +971,12 @@ class Prophet(object):
 
     def plot_holidays(self, fcst, ax=None, uncertainty=True):
         """Plot the holidays component of the forecast.
-
         Parameters
         ----------
         fcst: pd.DataFrame output of self.predict.
         ax: Optional matplotlib Axes to plot on. One will be created if this
             is not provided.
         uncertainty: Optional boolean to plot uncertainty intervals.
-
         Returns
         -------
         a list of matplotlib artists
@@ -1033,7 +1005,6 @@ class Prophet(object):
 
     def plot_weekly(self, ax=None, uncertainty=True, weekly_start=0):
         """Plot the weekly component of the forecast.
-
         Parameters
         ----------
         ax: Optional matplotlib Axes to plot on. One will be created if this
@@ -1042,7 +1013,6 @@ class Prophet(object):
         weekly_start: Optional int specifying the start day of the weekly
             seasonality plot. 0 (default) starts the week on Sunday. 1 shifts
             by 1 day to Monday, and so on.
-
         Returns
         -------
         a list of matplotlib artists
@@ -1073,7 +1043,6 @@ class Prophet(object):
 
     def plot_yearly(self, ax=None, uncertainty=True, yearly_start=0):
         """Plot the yearly component of the forecast.
-
         Parameters
         ----------
         ax: Optional matplotlib Axes to plot on. One will be created if
@@ -1082,7 +1051,6 @@ class Prophet(object):
         yearly_start: Optional int specifying the start day of the yearly
             seasonality plot. 0 (default) starts the year on Jan 1. 1 shifts
             by 1 day to Jan 2, and so on.
-
         Returns
         -------
         a list of matplotlib artists
@@ -1110,4 +1078,33 @@ class Prophet(object):
         ax.xaxis.set_major_locator(months)
         ax.set_xlabel('Day of year')
         ax.set_ylabel('yearly')
+        return artists
+
+    def plot_monthly(self, ax=None, uncertainty=True, monthly_start=0):
+        """Plot the monthly component of the forecast.
+        -------
+        a list of matplotlib artists
+        """
+        artists = []
+        if not ax:
+            fig = plt.figure(facecolor='w', figsize=(10, 6))
+            ax = fig.add_subplot(111)
+        # Compute monthly seasonality for a Sun-Sat sequence of dates.
+        days = (pd.date_range(start='2017-01-01', periods=7) +
+                pd.Timedelta(days=monthly_start))
+        df_w = pd.DataFrame({'ds': days, 'cap': 1.})
+        df_w = self.setup_dataframe(df_w)
+        seas = self.predict_seasonal_components(df_w)
+        days = days.weekday_name
+        artists += ax.plot(range(len(days)), seas['monthly'], ls='-',
+                           c='#0072B2')
+        if uncertainty:
+            artists += [ax.fill_between(range(len(days)),
+                                        seas['monthly_lower'], seas['monthly_upper'],
+                                        color='#0072B2', alpha=0.2)]
+        ax.grid(True, which='major', c='gray', ls='-', lw=1, alpha=0.2)
+        ax.set_xticks(range(len(days)))
+        ax.set_xticklabels(days)
+        ax.set_xlabel('Day of week')
+        ax.set_ylabel('monthly')
         return artists
