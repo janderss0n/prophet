@@ -1103,8 +1103,8 @@ class Prophet(object):
                                         seas['monthly_lower'], seas['monthly_upper'],
                                         color='#0072B2', alpha=0.2)]
         ax.grid(True, which='major', c='gray', ls='-', lw=1, alpha=0.2)
-        ax.set_xticks(range(len(days)))
-        ax.set_xticklabels(days)
+        ax.set_xticks(range(len(days)/10))
+        ax.set_xticklabels(days[1], days[11], days[21])
         ax.set_xlabel('Day of month')
         ax.set_ylabel('monthly')
         return artists
